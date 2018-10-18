@@ -13,25 +13,21 @@ MQTT_PORT = 1883
 MQTT_TOPIC = "/merakimv/#"
 
 #
-COLLECT_RAW_DETECTIONS = True
+COLLECT_RAW_DETECTIONS = False
 #
-COLLECT_ZONE_DETECTIONS = False
+COLLECT_ZONE_DETECTIONS = True
+#
+COLLECT_CAMERAS_SERIAL_NUMBERS = ["*"]
 # array of zone id, all is *. eg ["*"]
 COLLECT_ZONE_IDS = ["*"]
 
 
-def process_msg(topic, payload):
+def collect_raw_detection(topic, payload):
     # e.g.
     # /merakimv/Q2GV-S7PZ-FGBK/raw_detections
-    # /merakimv/Q2GV-S7PZ-FGBK/123
 
     parameters = topic.split("/")
-
-    if not COLLECT_RAW_DETECTIONS and parameters[2] == 'raw_detections':
-        return False
-
-    if not COLLECT_ZONE_DETECTIONS and parameters[2] != 'raw_detections':
-        return False
+    serial_number = parameters[2]
 
     if len(payload["objects"]) == 0:
         return False
@@ -48,28 +44,41 @@ def process_msg(topic, payload):
                 "y1": object["y1"],
             },
             'meraki_ts': payload["ts"],
-            "camera_serial_number": parameters[2],
+            "camera_serial_number": serial_number,
             'timestamp': datetime.now(),
+            "data_type": "zone"
         }
-
-        if COLLECT_RAW_DETECTIONS:
-            doc["collect_type"] = "raw_detections"
-
-        if COLLECT_ZONE_DETECTIONS:
-
-            # collect all zone information
-            if COLLECT_ZONE_IDS[0] == "*":
-                doc["zone_id"] = parameters[2]
-
-            # if current zoneID in the list
-            if len([i for i, x in enumerate(COLLECT_ZONE_IDS) if x == parameters[2]]):
-                doc["zone_id"] = parameters[2]
 
         post_msg_es(doc)
 
 
+def collect_zone_information(topic, payload):
+    ## /merakimv/Q2GV-S7PZ-FGBK/123
+
+    parameters = topic.split("/")
+    zone_id = parameters[3]
+    index = [i for i, x in enumerate(COLLECT_ZONE_IDS) if x == zone_id]
+
+    # if not wildcard or not in the zone_id list or equal to 0 (whole camera)
+    if COLLECT_ZONE_IDS[0] != "*":
+        if index == 0 or zone_id == "0":
+            return
+
+    doc = {
+        'topic': topic,
+        "count": payload,
+        "camera_serial_number": parameters[2],
+        'timestamp': datetime.now(),
+        "data_type": "zone",
+        "zone_id": zone_id
+    }
+
+    post_msg_es(doc)
+
+
 def post_msg_es(doc):
     try:
+
         res = es.index(index=ELASTICSEARCH_INDEX, doc_type=ELASTICSEARCH_DOC_TYPE, body=doc)
         print("[ES]success push info to es : {0}".format(res))
 
@@ -85,7 +94,20 @@ def on_connect(client, userdata, flags, rc):
 
 # The callback for when a PUBLISH message is received from the server.
 def on_message(client, userdata, msg):
-    process_msg(msg.topic, json.loads(msg.payload.decode("utf-8")))
+    payload = json.loads(msg.payload.decode("utf-8"))
+    parameters = msg.topic.split("/")
+    serial_number = parameters[2]
+
+    # filter camera
+    if COLLECT_CAMERAS_SERIAL_NUMBERS[0] != "*" or len(
+            [i for i, x in enumerate(COLLECT_CAMERAS_SERIAL_NUMBERS) if x == serial_number]):
+        return
+
+    if COLLECT_RAW_DETECTIONS and msg.topic[-14:] == 'raw_detections':
+        collect_raw_detection(msg.topic, payload)
+
+    if COLLECT_ZONE_DETECTIONS and msg.topic[-14:] != 'raw_detections':
+        collect_zone_information(msg.topic, payload)
 
 
 if __name__ == "__main__":
