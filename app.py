@@ -13,9 +13,9 @@ MQTT_PORT = 1883
 MQTT_TOPIC = "/merakimv/#"
 
 #
-COLLECT_RAW_DETECTIONS = False
+COLLECT_RAW_DETECTIONS = True
 #
-COLLECT_ZONE_DETECTIONS = True
+COLLECT_ZONE_DETECTIONS = False
 #
 COLLECT_CAMERAS_SERIAL_NUMBERS = ["*"]
 # array of zone id, all is *. eg ["*"]
@@ -46,7 +46,7 @@ def collect_raw_detection(topic, payload):
             'meraki_ts': payload["ts"],
             "camera_serial_number": serial_number,
             'timestamp': datetime.now(),
-            "data_type": "zone"
+            "data_type": "raw_detections"
         }
 
         post_msg_es(doc)
@@ -57,7 +57,7 @@ def collect_zone_information(topic, payload):
 
     parameters = topic.split("/")
     zone_id = parameters[3]
-    index = [i for i, x in enumerate(COLLECT_ZONE_IDS) if x == zone_id]
+    index = len([i for i, x in enumerate(COLLECT_ZONE_IDS) if x == zone_id])
 
     # if not wildcard or not in the zone_id list or equal to 0 (whole camera)
     if COLLECT_ZONE_IDS[0] != "*":
